@@ -59,6 +59,9 @@ def write_mat(out_imgs, out_genders, out_ages, db, img_size,
                          output)
 
 
+def get_passed(length, min_score, age, face_score, gender):
+    return [i for i in range(length) if 0<age[i]<=100 and face_score[i]>=min_score and ~np.isnan(gender[i])]
+
 def main():
     args = get_args()
     output_path = args.output
@@ -87,35 +90,36 @@ def main():
     filename = output_path.split('/')[-1].split('.')[0]
     ext = output_path.split('/')[-1].split('.')[1]
     total_count = 0
+    indexes = get_passed(length, min_score, age, face_score, gender)
+    effective_length = len(indexes)
     train_length = int(
-        max_count * train_ratio) if max_count is not None else int(length * train_ratio)
-    print(train_length)
-    for i in tqdm(range(length)):
+        max_count * train_ratio) if max_count is not None else int(effective_length * train_ratio)
+    print('train_length=%s' % train_length)
+    for i in tqdm(indexes):
         #print('total_count=%s' % total_count)
-        if face_score[i] < min_score:
-            continue
+#        if face_score[i] < min_score:
+#            print('face score bad')
+#            continue
 
 #         if (~np.isnan(second_face_score[i])) and second_face_score[i] > 0.0:
 #             continue
 
-        if ~(0 <= age[i] <= 100):
-            continue
+#        if ~(0 <= age[i] <= 100):
+#            print('age bad')
+#            continue
 
-        if np.isnan(gender[i]):
-            continue
+#        if np.isnan(gender[i]):
+#            print('gender bad')
+#            continue
 
         out_genders.append(int(gender[i]))
         out_ages.append(age[i])
         img = cv2.imread(root_path + str(full_path[i][0]))
         img = cv2.resize(img, (img_size, img_size))
-        #img = img
+
         out_imgs.append(img)
         total_count += 1
         if max_count is not None and total_count >= max_count:
-            write_mat(out_imgs, out_genders, out_ages, db, img_size,
-                      min_score, total_count, train_length, outpath_prefix,
-                      filename, file_count, ext
-                      )
             break
 
         if (len(out_imgs) % max_num_per_file == 0 and len(out_imgs) > 0) or \
@@ -132,6 +136,10 @@ def main():
             out_genders = []
             out_ages = []
             output = {}
+    write_mat(out_imgs, out_genders, out_ages, db, img_size,
+                    min_score, total_count, train_length, outpath_prefix,
+                      filename, file_count, ext
+                )
 
 
 if __name__ == '__main__':

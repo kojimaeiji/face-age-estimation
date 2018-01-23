@@ -59,10 +59,10 @@ def model_fn(learning_rate, lam, dropout):
 #     top_model.add(
 #         Dropout(dropout, input_shape=vgg16.layers[-1].output_shape[1:]))
     top_model = Dense(101, activation='softmax',
-                      init='uniform', name='last')(top_model)
+                      kernel_initializer='uniform', name='last')(top_model)
     model = Model(inputs=vgg16.input, outputs=top_model)
-    for layer in model.layers[:18]:
-        layer.trainable = False
+    #for layer in model.layers[:18]:
+    #    layer.trainable = False
 
     compile_model(model, learning_rate)
     return model
@@ -247,7 +247,7 @@ def unpack(xy):
 
 def download_mats(file_prefix):
     if file_prefix.startswith('gs://'):
-        cmd = 'gsutil cp -r %s /tmp' % file_prefix
+        cmd = 'gsutil -m cp -r %s /tmp' % file_prefix
         subprocess.check_call(cmd.split())
         return '/tmp/%s' % file_prefix.split('/')[-1]
     else:

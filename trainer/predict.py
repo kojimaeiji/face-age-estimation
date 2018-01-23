@@ -4,7 +4,7 @@ Created on 2018/01/21
 @author: jiman
 '''
 import argparse
-from trainer_mat import model
+from trainer import model
 from keras.models import load_model
 import cv2
 import subprocess
