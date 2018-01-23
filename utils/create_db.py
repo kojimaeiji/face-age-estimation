@@ -3,7 +3,7 @@ import cv2
 import scipy.io
 import argparse
 from tqdm import tqdm
-from .utils import get_meta
+from utils import get_meta
 
 
 def get_args():
@@ -24,6 +24,8 @@ def get_args():
                         help="max_count")
     parser.add_argument("--max_num_per_file", type=int, default=2048,
                         help="max_num_per_file")
+    parser.add_argument("--train_ratio", type=float, default=0.8,
+                        help="train_ratio")
     args = parser.parse_args()
     return args
 
@@ -35,6 +37,28 @@ def path_concat(path_list):
     return path
 
 
+def write_mat(out_imgs, out_genders, out_ages, db, img_size,
+              min_score, total_count, train_length, outpath_prefix,
+              filename, file_count, ext
+              ):
+    output = {"image": np.array(out_imgs),
+              "gender": np.array(out_genders),
+              "age": np.array(out_ages),
+              "db": db,
+              "img_size": img_size,
+              "min_score": min_score}
+    if total_count <= train_length:
+        scipy.io.savemat('%s/%s-tr-%s.%s' % (outpath_prefix,
+                                             filename,
+                                             file_count, ext),
+                         output)
+    else:
+        scipy.io.savemat('%s/%s-cv-%s.%s' % (outpath_prefix,
+                                             filename,
+                                             file_count, ext),
+                         output)
+
+
 def main():
     args = get_args()
     output_path = args.output
@@ -44,6 +68,7 @@ def main():
     img_size = args.img_size
     min_score = args.min_score
     max_num_per_file = args.max_num_per_file
+    train_ratio = args.train_ratio
 
     root_path = "data/{}_crop/".format(db)
     mat_path = root_path + "{}.mat".format(db)
@@ -56,13 +81,17 @@ def main():
 
     length = len(face_score)
 #    max_num_per_file = num_per_file
-    file_count = 1
+    file_count = 0
     outpath_prefix = output_path.split('/')[:-1]
     outpath_prefix = path_concat(outpath_prefix)
     filename = output_path.split('/')[-1].split('.')[0]
     ext = output_path.split('/')[-1].split('.')[1]
     total_count = 0
+    train_length = int(
+        max_count * train_ratio) if max_count is not None else int(length * train_ratio)
+    print(train_length)
     for i in tqdm(range(length)):
+        #print('total_count=%s' % total_count)
         if face_score[i] < min_score:
             continue
 
@@ -82,15 +111,23 @@ def main():
         #img = img
         out_imgs.append(img)
         total_count += 1
-        if max_count is not None and total_count > max_count:
+        if max_count is not None and total_count >= max_count:
+            write_mat(out_imgs, out_genders, out_ages, db, img_size,
+                      min_score, total_count, train_length, outpath_prefix,
+                      filename, file_count, ext
+                      )
             break
 
-        if len(out_imgs) % max_num_per_file == 0 and len(out_imgs) > 0:
-            output = {"image": np.array(out_imgs), "gender": np.array(out_genders), "age": np.array(out_ages),
-                      "db": db, "img_size": img_size, "min_score": min_score}
-            scipy.io.savemat('%s/%s-%s.%s' % (outpath_prefix,
-                                              filename, file_count, ext), output)
+        if (len(out_imgs) % max_num_per_file == 0 and len(out_imgs) > 0) or \
+                total_count == train_length:
+            write_mat(out_imgs, out_genders, out_ages, db, img_size,
+                      min_score, total_count, train_length, outpath_prefix,
+                      filename, file_count, ext
+                      )
             file_count += 1
+            if total_count == train_length:
+                print('train range end')
+                file_count = 0
             out_imgs = []
             out_genders = []
             out_ages = []

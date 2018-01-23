@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 from trainer import model
-from trainer.model import DataSequence, create_data
+from trainer.model import DataSequence, download_mats
 import keras
 import logging
 from logging import StreamHandler
@@ -25,14 +25,14 @@ import argparse
 import glob
 import os
 
-
+import multiprocessing
 from tensorflow.python.lib.io import file_io
 
 
 # CHUNK_SIZE specifies the number of lines
 # to read in case the file is very large
 FILE_PATH = 'checkpoint.{epoch:02d}.hdf5'
-CENSUS_MODEL = 'ordinal_face.hdf5'
+FACE_AGE_MODEL = 'face_age.hdf5'
 
 
 class ContinuousEval(keras.callbacks.Callback):
@@ -42,14 +42,13 @@ class ContinuousEval(keras.callbacks.Callback):
 
     def __init__(self,
                  eval_frequency,
-                 x, y,
+                 vaidation_prefix,
                  learning_rate,
                  job_dir):
         self.eval_frequency = eval_frequency
         self.learning_rate = learning_rate
         self.job_dir = job_dir
-        self.x = x
-        self.y = y
+        self.validation_prefix = vaidation_prefix
 
     def on_epoch_begin(self, epoch, logs={}):
         if epoch > 0 and epoch % self.eval_frequency == 0:
@@ -63,29 +62,28 @@ class ContinuousEval(keras.callbacks.Callback):
             checkpoints = glob.glob(model_path_glob)
             if len(checkpoints) > 0:
                 checkpoints.sort()
-                census_model = load_model(checkpoints[-1])
+                census_model = load_model(checkpoints[-1], compile=False)
                 census_model = model.compile_model(
                     census_model, self.learning_rate)
                 data_sequence = DataSequence(
-                    self.x, self.y, batch_size=32)
-                loss_acc = census_model.evaluate_generator(
+                    self.validation_prefix)
+                loss, acc = census_model.evaluate_generator(
                     data_sequence,
                     steps=data_sequence.length)
-                loss = loss_acc[0:80]
-                acc = loss_acc[80:]
-                for ac, lo in zip(acc,loss):
-                    print('\nEvaluation epoch[{}] metrics[{:.2f}, {:.2f}] {}'.format(
-                        epoch, lo, ac, census_model.metrics_names))
+                print('\nEvaluation epoch[{}] metrics[{:.2f}, {:.2f}] {}'.
+                      format(
+                          epoch, loss, acc, census_model.metrics_names))
                 if self.job_dir.startswith("gs://"):
                     copy_file_to_gcs(self.job_dir, checkpoints[-1])
             else:
                 print(
-                    '\nEvaluation epoch[{}] (no checkpoints found)'.format(epoch))
+                    '\nEvaluation epoch[{}] (no checkpoints found)'.
+                    format(epoch))
 
 
-def dispatch(train_files,
+def dispatch(train_prefix,
+             validation_prefix,
              job_dir,
-             train_batch_size,
              learning_rate,
              eval_frequency,
              num_epochs,
@@ -94,17 +92,22 @@ def dispatch(train_files,
              dropout
              ):
 
-    x_train, y_train, x_test, y_test, input_shape = create_data(train_files)
+    # download train data
+    train_tmp_prefix = download_mats(train_prefix)
+
+    # download train data
+    validation_tmp_prefix = download_mats(validation_prefix)
+
     logger = logging.getLogger()
     sh = StreamHandler(stdout)
     logger.addHandler(sh)
     logger.setLevel(logging.INFO)
     logger.info('learning_rate=%s' % learning_rate)
-    census_model = model.model_fn(learning_rate, lam, dropout)
+    face_age_model = model.model_fn(learning_rate, lam, dropout)
 
     try:
         os.makedirs(job_dir)
-    except:
+    except Exception:
         pass
 
     # Unhappy hack to work around h5py not being able to write to GCS.
@@ -129,7 +132,7 @@ def dispatch(train_files,
 
     # Continuous eval callback
     evaluation = ContinuousEval(eval_frequency,
-                                x_test, y_test,
+                                validation_tmp_prefix,
                                 learning_rate,
                                 job_dir,
                                 )
@@ -144,39 +147,41 @@ def dispatch(train_files,
     callbacks = [checkpoint, evaluation, tblog]
 
     train_data_sequence = DataSequence(
-         x_train, y_train,
-         batch_size=train_batch_size
+        train_tmp_prefix
     )
+    #x_train, y_train = train_data_sequence.__getitem__(0)
 #     test_data_sequence = DataSequence(
-#         x_test, y_test,
-#         batch_size=train_batch_size)
-    
-    census_model.fit_generator(#x_train, y_train,
+#         validation_tmp_prefix
+#     )
+
+    face_age_model.fit_generator(  # x_train, y_train,
         #model.generator_input(train_files, chunk_size=CHUNK_SIZE),
         train_data_sequence,
-        validation_data=(x_test, y_test),
+        # validation_data=test_data_sequence,
         steps_per_epoch=train_data_sequence.length,
-        epochs=num_epochs, workers=4, use_multiprocessing=True,
+        epochs=num_epochs,
+        workers=multiprocessing.cpu_count(),
+        use_multiprocessing=True,
         callbacks=callbacks)
 
-    #plot_history(history)
+    # plot_history(history)
     # Unhappy hack to work around h5py not being able to write to GCS.
     # Force snapshots and saves to local filesystem, then copy them over to
     # GCS.
     if job_dir.startswith("gs://"):
-        census_model.save(CENSUS_MODEL)
-        copy_file_to_gcs(job_dir, CENSUS_MODEL)
+        face_age_model.save(FACE_AGE_MODEL)
+        copy_file_to_gcs(job_dir, FACE_AGE_MODEL)
     else:
-        census_model.save(os.path.join(job_dir, CENSUS_MODEL))
+        face_age_model.save(os.path.join(job_dir, FACE_AGE_MODEL))
 
     # Convert the Keras model to TensorFlow SavedModel
-    model.to_savedmodel(census_model, os.path.join(job_dir, 'export'))
+    model.to_savedmodel(face_age_model, os.path.join(job_dir, 'export'))
 
 # h5py workaround: copy local models over to GCS if the job_dir is GCS.
 
 # def plot_history(history):
 #     # print(history.history.keys())
-# 
+#
 #     # 精度の履歴をプロット
 #     plt.plot(history.history['acc'])
 #     plt.plot(history.history['val_acc'])
@@ -185,7 +190,7 @@ def dispatch(train_files,
 #     plt.ylabel('accuracy')
 #     plt.legend(['acc', 'val_acc'], loc='lower right')
 #     plt.show()
-# 
+#
 #     # 損失の履歴をプロット
 #     plt.plot(history.history['loss'])
 #     plt.plot(history.history['val_loss'])
@@ -194,34 +199,37 @@ def dispatch(train_files,
 #     plt.ylabel('loss')
 #     plt.legend(['loss', 'val_loss'], loc='lower right')
 #     plt.show()
-# 
+#
 # # 学習履歴をプロット
 #     plot_history(history)
 
+
 def copy_file_to_gcs(job_dir, file_path):
     with file_io.FileIO(file_path, mode='r') as input_f:
-        with file_io.FileIO(os.path.join(job_dir, file_path), mode='w+') as output_f:
+        with file_io.FileIO(os.path.join(job_dir, file_path), mode='w+') \
+                as output_f:
             output_f.write(input_f.read())
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--trainer-files',
+    parser.add_argument('--train-prefix', '-tr',
                         required=True,
                         type=str,
-                        help='Training files local or GCS', nargs='+')
+                        help='Training files prefix local or GCS')
+    parser.add_argument('--validation-prefix', '-cv',
+                        required=True,
+                        type=str,
+                        help='Validation files prefix local or GCS')
     parser.add_argument('--job-dir',
                         required=True,
                         type=str,
-                        help='GCS or local dir to write checkpoints and export model')
-    parser.add_argument('--trainer-batch-size',
-                        type=int,
-                        default=32,
-                        help='Batch size for training steps')
+                        help='GCS or local dir to write checkpoints and '
+                        'export model')
     parser.add_argument('--learning-rate',
                         type=float,
                         default=0.003,
-                        help='Learning rate for Adam')
+                        help='Learning rate')
     parser.add_argument('--eval-frequency',
                         default=1,
                         help='Perform one evaluation per n epochs')

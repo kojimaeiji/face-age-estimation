@@ -16,7 +16,6 @@
 from keras.layers.core import Flatten, Dense, Activation, Dropout
 from keras.layers.convolutional import Conv2D
 from keras.layers.pooling import MaxPool2D
-from keras.datasets import cifar10
 from keras.models import Model, Sequential
 #import cv2
 from keras.utils import Sequence
@@ -28,16 +27,15 @@ import subprocess
 from keras.applications.vgg16 import VGG16
 from keras.optimizers import Optimizer
 from keras.legacy import interfaces
+import glob
 """Implements the Keras Sequential model."""
 
 
 import keras
-import pandas as pd
 from keras import backend as K, metrics
 from keras import models
 from keras.layers import Input
 
-import tensorflow as tf
 from tensorflow.python.saved_model import builder as saved_model_builder
 from tensorflow.python.saved_model import tag_constants, signature_constants
 from tensorflow.python.saved_model.signature_def_utils_impl import predict_signature_def
@@ -48,16 +46,24 @@ import logging
 
 def model_fn(learning_rate, lam, dropout):
     """Create a Keras Sequential model with layers."""
-    input_tensor = Input(shape=(224, 224, 3))
-    vgg16 = VGG16(include_top=True, weights='imagenet', input_tensor=input_tensor)
-    vgg16.layers.pop()
-    vgg16.outputs = [vgg16.layers[-1].output]
-    vgg16.layers[-1].outbound_nodes = []
+    input_tensor = Input(shape=(60, 60, 3))
+    vgg16 = VGG16(include_top=False, weights='imagenet',
+                  input_tensor=input_tensor)
+    # vgg16.layers.pop()
+    #vgg16.outputs = [vgg16.layers[-1].output]
+    #vgg16.layers[-1].outbound_nodes = []
+    # 最後のconv層の直前までの層をfreeze
     #vgg16.output_shape = vgg16.layers[-1].output_shape
-    top_model = Sequential()
-    top_model.add(Dropout(dropout, input_shape=vgg16.layers[-1].output_shape[1:]))
-    top_model.add(Dense(101, activation='softmax', init='uniform', name='last'))
-    model = Model(inputs=vgg16.input,outputs=top_model(vgg16.outputs))
+    top_model = Flatten()(vgg16.output)
+    top_model = Dense(101, activation='relu')(top_model)
+#     top_model.add(
+#         Dropout(dropout, input_shape=vgg16.layers[-1].output_shape[1:]))
+    top_model = Dense(101, activation='softmax',
+                      init='uniform', name='last')(top_model)
+    model = Model(inputs=vgg16.input, outputs=top_model)
+    for layer in model.layers[:18]:
+        layer.trainable = False
+
     compile_model(model, learning_rate)
     return model
 
@@ -68,10 +74,13 @@ def compile_model(model, learning_rate):
         if layer.name in ['last']:
             last_layer_variables.extend(layer.weights)
     model.compile(loss='categorical_crossentropy',
-                  optimizer=MultiSGD(lr=learning_rate, momentum=0.9, 
+                  optimizer=MultiSGD(lr=learning_rate, momentum=0.9,
                                      decay=0.0005,
                                      exception_vars=last_layer_variables,
                                      multiplier=10),
+                  # optimizer=SGD(lr=learning_rate, momentum=0.9,
+                  #                                 decay=0.0005,
+                  #                                 ),
                   metrics=['accuracy'])
     return model
 
@@ -91,7 +100,7 @@ class MultiSGD(Optimizer):
     """
 
     def __init__(self, lr=0.01, momentum=0., decay=0.,
-                 nesterov=False,exception_vars=None, multiplier=10, **kwargs):
+                 nesterov=False, exception_vars=None, multiplier=10, **kwargs):
         super(MultiSGD, self).__init__(**kwargs)
         with K.name_scope(self.__class__.__name__):
             self.iterations = K.variable(0, dtype='int64', name='iterations')
@@ -117,7 +126,10 @@ class MultiSGD(Optimizer):
         moments = [K.zeros(shape) for shape in shapes]
         self.weights = [self.iterations] + moments
         for p, g, m in zip(params, grads, moments):
-            multiplied_lr = lr * self.multiplier if p in self.exception_vars else lr
+            multiplied_lr = lr  # * self.multiplier if p in self.exception_vars \
+            # else lr
+            if p in self.exception_vars:
+                print(p)
             v = self.momentum * m - multiplied_lr * g  # velocity
             self.updates.append(K.update(m, v))
 
@@ -138,8 +150,9 @@ class MultiSGD(Optimizer):
                   'momentum': float(K.get_value(self.momentum)),
                   'decay': float(K.get_value(self.decay)),
                   'nesterov': self.nesterov,
-                  'exception_vars': self.exception_vars,
-                  'multiplier': self.multiplier}
+                  #'exception_vars': self.exception_vars,
+                  #'multiplier': self.multiplier
+                  }
         base_config = super(MultiSGD, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
@@ -166,39 +179,46 @@ def convert_to_ordinal(age):
     age_vecs = []
     for i in range(80):
         if age > i:
-            age_vec = np.array([0.0,1.0])
+            age_vec = np.array([0.0, 1.0])
         else:
-            age_vec = np.array([1.0,0.0])
-        age_vecs.append(age_vec) 
+            age_vec = np.array([1.0, 0.0])
+        age_vecs.append(age_vec)
     #print('age=%s, age_vec = %s' % (age, age_vec))
     return age_vecs
 
 
+def get_filenum(file_prefix):
+    files = glob.glob(file_prefix)
+    return len(files)
+
+
+def create_y_encode(y):
+    return [1.0, 0.0] if y > 0.5 else [0.0, 1.0]
+
+
 class DataSequence(Sequence):
-    def __init__(self, x, y, batch_size):
-        self.x = x
-        self.y = y
-        self.batch_size = batch_size
-        self.length = len(self.x) // batch_size if len(
-            self.x) % batch_size == 0 else (len(self.x) // batch_size) + 1
+    def __init__(self, file_prefix):
+        self.file_prefix = file_prefix
+
+        self.length = get_filenum(file_prefix)
 
     def __getitem__(self, idx):
         # データの取得実装
         logger = logging.getLogger()
         #logger.info('idx=%s' % idx)
-        #age = self.data.loc[:, 2]
 
-        batch_size = self.batch_size
-
-        # last batch or not
-        if idx != self.length - 1:
-            X, Y = convert_to_minibatch(
-                self.x, self.y, idx * batch_size, (idx + 1) * batch_size)
-        else:
-            X, Y = convert_to_minibatch(
-                self.x, self.y, idx * batch_size, None)
-
-        return X, Y
+        #batch_size = self.batch_size
+        file_prefix = self.file_prefix.split('/')[-1][0:-1]
+        root = self.file_prefix.split(file_prefix)[0]
+        filename = '%s-%s.mat' % (file_prefix, idx)
+        full_path = '%s%s' % (root, filename)
+        #print('full_path=%s' % full_path)
+        x, y = load_data(full_path)
+        x = x / 255.0
+        #y = np.array([create_y_encode(y[i]) for i in range(len(y))])
+        y = np_utils.to_categorical(y, 101)
+        #print('return x,y')
+        return x, y
 
     def __len__(self):
         # バッチ数
@@ -219,32 +239,27 @@ def convert_to_minibatch(X, Y, start_idx, end_idx):
 
     return X_mini, Y_mini
 
+
 def unpack(xy):
     x, y = xy
     return x, y
 
 
+def download_mats(file_prefix):
+    if file_prefix.startswith('gs://'):
+        cmd = 'gsutil cp -r %s /tmp' % file_prefix
+        subprocess.check_call(cmd.split())
+        return '/tmp/%s' % file_prefix.split('/')[-1]
+    else:
+        return file_prefix
+
+
 def load_data(mat_path):
-    cmd = 'gsutil cp %s /tmp' % mat_path[0]
-    subprocess.check_call(cmd.split())
-    filename = mat_path[0].split('/')[-1]
-    d = loadmat('/tmp/%s' % filename)
+    d = loadmat(mat_path)
 
     x, y = d["image"], d["age"][0]
-    length = len(y)
-    full_mat = [(x[i], y[i]) for i in range(length)]
-    random.shuffle(full_mat)
-    train_ratio = 0.9
-    train_end = int(length * train_ratio)
-    full_mat_train = full_mat[0:train_end]
-    full_mat_test = full_mat[train_end:]
-    test_length = len(full_mat_test)
-    print(full_mat_train[0][0].shape)
-    x_train = np.array([full_mat_train[i][0] for i in range(train_end)])
-    y_train = np.array([full_mat_train[i][1] for i in range(train_end)])
-    x_test = np.array([full_mat_test[i][0] for i in range(test_length)])
-    y_test = np.array([full_mat_test[i][1] for i in range(test_length)])
-    return (x_train, y_train), (x_test, y_test)
+    return x, y
+
 
 def convert_to_column_list(y):
     columns = []
@@ -257,6 +272,7 @@ def convert_to_column_list(y):
         column = np.array(column)
         columns.append(column)
     return columns
+
 
 def create_data(input_file):
     (X_train, y_train), (X_test, y_test) = load_data(input_file)
@@ -283,36 +299,33 @@ def create_data(input_file):
     #y_train = np_utils.to_categorical(y_train, 10)
 #     y_test = np_utils.to_categorical(y_test, 10)
     y_train = [convert_to_ordinal(y_train[i])
-                        for i in range(len(y_train))]
+               for i in range(len(y_train))]
     y_train = convert_to_column_list(y_train)
     y_test = [convert_to_ordinal(y_test[i])
-                       for i in range(len(y_test))]
+              for i in range(len(y_test))]
     y_test = convert_to_column_list(y_test)
     return X_train, y_train, X_test, y_test, input_shape
 
 
 if __name__ == '__main__':
-#     x_tr, y_tr, x_t, y_t, input_shape = create_data(['gs://kceproject-1113-ml/ordinal-face/wiki_process_10000.mat'])
-#     print(x_tr.shape, input_shape)
-#     print(len(y_tr))
-#     print(y_tr[0])
-    
+    #     x_tr, y_tr, x_t, y_t, input_shape = create_data(['gs://kceproject-1113-ml/ordinal-face/wiki_process_10000.mat'])
+    #     print(x_tr.shape, input_shape)
+    #     print(len(y_tr))
+    #     print(y_tr[0])
+
     model = model_fn(learning_rate=0.001, lam=0.0, dropout=0.5)
     print(model.summary())
     #print(type(np_utils.to_categorical(5, 10)[0]))
-#     data = get_meta(
-#         ['gs://kceproject-1113-ml/intermediate/csv/path_age.csv-00000-of-00221'])
-    #seq = DataSequence(x_tr, y_tr, 64)
-#                        input_file=[
-#                            u'gs://kceproject-1113-ml/intermediate/csv/path_age.csv-00000-of-00221'],
-#                        debug_mode=True,
-#                        meta_data=data,
-#                        batch_size=32,
-#                        data_type='trainer')
-#     x_t, y_t = seq.__getitem__(0)
-#     print(x_t.shape)
-#     print(len(y_t[0][0]))
-    
+    #     data = get_meta(
+    #         ['gs://kceproject-1113-ml/intermediate/csv/path_age.csv-00000-of-00221'])
+    seq = DataSequence('/Users/saboten/data/wiki_process_60_128*')
+    x_t, y_t = seq.__getitem__(0)
+    print(seq.length)
+    print(x_t.shape)
+    print(y_t.shape)
+    print[x_t[0]]
+    print(y_t[0])
+
 #     data=model.evaluate_generator(
 #                     seq,
 #                     steps=seq.length)
