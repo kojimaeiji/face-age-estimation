@@ -9,10 +9,10 @@ gcloud ml-engine local train \
 --module-name trainer.task \
 --package-path trainer/ \
   -- \
- -tr "/Users/saboten/data/wiki_process_60_128*" \
- -cv "/Users/saboten/data/wiki_process_60_128*" \
+ -tr "/Users/saboten/data/wiki_process_60_128-tr*" \
+ -cv "/Users/saboten/data/wiki_process_60_128-cv*" \
 --learning-rate 0.0001 \
---num-epochs 2 \
+--num-epochs 20 \
 --dropout 0.0 \
 --lam 0.0
 
