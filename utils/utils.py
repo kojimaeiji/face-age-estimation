@@ -1,7 +1,7 @@
 from scipy.io import loadmat
 from datetime import datetime
 import os
-
+import random
 
 def calc_age(taken, dob):
     birth = datetime.fromordinal(max(int(dob) - 366, 1))
@@ -23,6 +23,14 @@ def get_meta(mat_path, db):
     second_face_score = meta[db][0, 0]["second_face_score"][0]
     age = [calc_age(photo_taken[i], dob[i]) for i in range(len(dob))]
 
+    indexes = [i for i in range(len(face_score))]
+    random.shuffle(indexes)
+    full_path = [full_path[idx] for idx in indexes]
+    dob = [dob[idx] for idx in indexes]
+    gender = [gender[idx] for idx in indexes]
+    face_score = [face_score[idx] for idx in indexes]
+    second_face_score = [second_face_score[idx] for idx in indexes]
+    age = [age[idx] for idx in indexes]
     return full_path, dob, gender, photo_taken, face_score, second_face_score, age
 
 

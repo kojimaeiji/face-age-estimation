@@ -3,13 +3,15 @@ import cv2
 import scipy.io
 import argparse
 from tqdm import tqdm
-from utils import get_meta
+from .utils import get_meta
 
 
 def get_args():
     parser = argparse.ArgumentParser(description="This script cleans-up noisy labels "
                                                  "and creates database for training.",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+#    parser.add_argument("--input", "-i", type=str, required=True,
+#                        help="path to input database mat file")
     parser.add_argument("--output", "-o", type=str, required=True,
                         help="path to output database mat file")
     parser.add_argument("--db", type=str, default="wiki",
@@ -20,22 +22,28 @@ def get_args():
                         help="minimum face_score")
     parser.add_argument("--max_count", type=int, default=None,
                         help="max_count")
+    parser.add_argument("--max_num_per_file", type=int, default=2048,
+                        help="max_num_per_file")
     args = parser.parse_args()
     return args
+
 
 def path_concat(path_list):
     path = ''
     for s in path_list:
-        path += s+'/'
+        path += s + '/'
     return path
+
 
 def main():
     args = get_args()
     output_path = args.output
     db = args.db
+#    mat_path = args.input
     max_count = args.max_count
     img_size = args.img_size
     min_score = args.min_score
+    max_num_per_file = args.max_num_per_file
 
     root_path = "data/{}_crop/".format(db)
     mat_path = root_path + "{}.mat".format(db)
@@ -47,12 +55,13 @@ def main():
     out_imgs = []
 
     length = len(face_score)
-    max_num_per_file = 5000
+#    max_num_per_file = num_per_file
     file_count = 1
     outpath_prefix = output_path.split('/')[:-1]
     outpath_prefix = path_concat(outpath_prefix)
     filename = output_path.split('/')[-1].split('.')[0]
     ext = output_path.split('/')[-1].split('.')[1]
+    total_count = 0
     for i in tqdm(range(length)):
         if face_score[i] < min_score:
             continue
@@ -72,19 +81,20 @@ def main():
         img = cv2.resize(img, (img_size, img_size))
         #img = img
         out_imgs.append(img)
-        if max_count is not None and len(out_imgs) >= max_count:
+        total_count += 1
+        if max_count is not None and total_count > max_count:
             break
 
         if len(out_imgs) % max_num_per_file == 0 and len(out_imgs) > 0:
             output = {"image": np.array(out_imgs), "gender": np.array(out_genders), "age": np.array(out_ages),
-                  "db": db, "img_size": img_size, "min_score": min_score}
-            scipy.io.savemat('%s/%s-%s.%s' % (outpath_prefix,filename,file_count,ext), output)
-            file_count+=1
+                      "db": db, "img_size": img_size, "min_score": min_score}
+            scipy.io.savemat('%s/%s-%s.%s' % (outpath_prefix,
+                                              filename, file_count, ext), output)
+            file_count += 1
             out_imgs = []
             out_genders = []
             out_ages = []
             output = {}
-
 
 
 if __name__ == '__main__':
