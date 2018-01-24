@@ -22,12 +22,14 @@ from keras.utils import Sequence
 from keras.utils import np_utils
 from scipy.io import loadmat
 import random
+import tensorflow as tf
 from keras.layers.normalization import BatchNormalization
 import subprocess
 from keras.applications.vgg16 import VGG16
-from keras.optimizers import Optimizer
+from keras.optimizers import Optimizer, SGD, Adam
 from keras.legacy import interfaces
 import glob
+import tensorflow
 """Implements the Keras Sequential model."""
 
 
@@ -55,11 +57,11 @@ def model_fn(learning_rate, lam, dropout):
     # 最後のconv層の直前までの層をfreeze
     #vgg16.output_shape = vgg16.layers[-1].output_shape
     top_model = Flatten()(vgg16.output)
-    top_model = Dense(101, activation='relu', name='last_2')(top_model)
+    top_model = Dense(101, activation='relu', name='last_2', kernel_initializer='random_uniform')(top_model)
 #     top_model.add(
 #         Dropout(dropout, input_shape=vgg16.layers[-1].output_shape[1:]))
     top_model = Dense(101, activation='softmax',
-                      kernel_initializer='uniform', name='last')(top_model)
+                      kernel_initializer='random_uniform', name='last')(top_model)
     model = Model(inputs=vgg16.input, outputs=top_model)
     for layer in model.layers[:18]:
         layer.trainable = False
@@ -74,16 +76,22 @@ def compile_model(model, learning_rate):
         if layer.name in ['last', 'last_2']:
             last_layer_variables.extend(layer.weights)
     model.compile(loss='categorical_crossentropy',
-                  optimizer=MultiSGD(lr=learning_rate, momentum=0.9,
-                                     decay=0.0005,
-                                     exception_vars=last_layer_variables,
-                                     multiplier=10),
-                  # optimizer=SGD(lr=learning_rate, momentum=0.9,
-                  #                                 decay=0.0005,
-                  #                                 ),
-                  metrics=['accuracy'])
+#                   optimizer=MultiSGD(lr=learning_rate, momentum=0.9,
+#                                      decay=0.0005,
+#                                      exception_vars=last_layer_variables,
+#                                      multiplier=10),
+                optimizer=Adam(lr=learning_rate),
+                  metrics=['accuracy', age_mae])
     return model
 
+CONST_LIST = [float(_i) for _i in range(101)]
+
+def age_mae(y_true, y_pred):
+    y_true = tf.cast(K.argmax(y_true, axis=1),'float')
+    labels = K.constant(CONST_LIST, dtype=tf.float32)
+    y_pred = labels * y_pred
+    y_pred = K.sum(y_pred, axis=1)
+    return K.mean(K.abs(y_true-y_pred), axis=0)
 
 class MultiSGD(Optimizer):
     """Stochastic gradient descent optimizer.
@@ -367,7 +375,7 @@ def create_data(input_file):
 
 
 if __name__ == '__main__':
-    file_prefix = download_mats('/Users/saboten/data/wiki_process_10000.mat')
+    file_prefix = download_mats('/home/jiman/data/wiki_process_10000.mat')
     x_tr, y_tr, x_t, y_t, input_shape = create_data(
         file_prefix)
     #     print(x_tr.shape, input_shape)
@@ -380,10 +388,16 @@ if __name__ == '__main__':
     #     data = get_meta(
     #         ['gs://kceproject-1113-ml/intermediate/csv/path_age.csv-00000-of-00221'])
 #    seq = DataSequence('/Users/saboten/data/wiki_process_60_128*')
-    seq = DataSequence(x_t, y_t, 64)
-    x_t, y_t = seq.__getitem__(0)
-    print(seq.length)
-    print(x_t.shape)
+#     seq = DataSequence(x_tr, y_tr, 64)
+#     x_tr, y_tr = seq.__getitem__(0)
+#     print(seq.length)
+#     print(x_tr.shape)
+#     print(y_tr.shape)
+#     print(x_tr[0])
+#     print(y_tr[0])
+    cv_seq = DataSequence(x_t, y_t, 64)
+    print('cv_length=%s' % cv_seq.length)
+    print(y_t.shape)
     print(y_t.shape)
     print(x_t[0])
     print(y_t[0])

@@ -68,12 +68,12 @@ class ContinuousEval(keras.callbacks.Callback):
                     face_age_model, self.learning_rate)
                 # data_sequence = DataSequence(
                 #    self.validation_prefix)
-                loss, acc = face_age_model.evaluate_generator(
+                loss, acc, mae = face_age_model.evaluate_generator(
                     self.data_sequence,
                     steps=self.data_sequence.length)
-                print('\nEvaluation epoch[{}] metrics[{:.2f}, {:.2f}] {}'.
+                print('\nEvaluation epoch[{}] metrics[{:.2f}, {:.2f}, {:.2f}] {}'.
                       format(
-                          epoch, loss, acc, face_age_model.metrics_names))
+                          epoch, loss, acc, mae, face_age_model.metrics_names))
                 if self.job_dir.startswith("gs://"):
                     copy_file_to_gcs(self.job_dir, checkpoints[-1])
             else:
@@ -162,7 +162,8 @@ def dispatch(train_prefix,
     face_age_model.fit_generator(  # x_train, y_train,
         #model.generator_input(train_files, chunk_size=CHUNK_SIZE),
         train_data_sequence,
-        # validation_data=test_data_sequence,
+        validation_data=(cv_x, cv_y),
+        #validation_steps=val_datasequence.length,
         steps_per_epoch=train_data_sequence.length,
         epochs=num_epochs,
         workers=multiprocessing.cpu_count(),

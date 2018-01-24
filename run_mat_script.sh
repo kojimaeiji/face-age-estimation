@@ -12,9 +12,8 @@ gcloud ml-engine jobs submit training $JOB_NAME \
   --region us-central1 \
   --scale-tier basic-gpu \
   -- \
-  -tr "gs://kceproject-1113-ml/face-age-estimation/wiki_process_60_8092-tr*" \
-  -cv "gs://kceproject-1113-ml/face-age-estimation/wiki_process_60_8092-cv*" \
+  -tr "gs://kceproject-1113-ml/ordinal-face/wiki_processed_all.mat" \
   --lam 0.0 \
   --dropout 0.0 \
   --num-epochs 20 \
-  --learning-rate 0.0001
+  --learning-rate 0.01
