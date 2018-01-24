@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 from trainer import model
-from trainer.model import DataSequence, download_mats
+from trainer.model import DataSequence, download_mats, create_data
 import keras
 import logging
 from logging import StreamHandler
@@ -42,13 +42,14 @@ class ContinuousEval(keras.callbacks.Callback):
 
     def __init__(self,
                  eval_frequency,
-                 vaidation_prefix,
+                 data_sequence,
                  learning_rate,
                  job_dir):
         self.eval_frequency = eval_frequency
         self.learning_rate = learning_rate
         self.job_dir = job_dir
-        self.validation_prefix = vaidation_prefix
+        self.data_sequence = data_sequence
+#        self.validation_prefix = vaidation_prefix
 
     def on_epoch_begin(self, epoch, logs={}):
         if epoch > 0 and epoch % self.eval_frequency == 0:
@@ -62,17 +63,17 @@ class ContinuousEval(keras.callbacks.Callback):
             checkpoints = glob.glob(model_path_glob)
             if len(checkpoints) > 0:
                 checkpoints.sort()
-                census_model = load_model(checkpoints[-1], compile=False)
-                census_model = model.compile_model(
-                    census_model, self.learning_rate)
-                data_sequence = DataSequence(
-                    self.validation_prefix)
-                loss, acc = census_model.evaluate_generator(
-                    data_sequence,
-                    steps=data_sequence.length)
+                face_age_model = load_model(checkpoints[-1], compile=False)
+                face_age_model = model.compile_model(
+                    face_age_model, self.learning_rate)
+                # data_sequence = DataSequence(
+                #    self.validation_prefix)
+                loss, acc = face_age_model.evaluate_generator(
+                    self.data_sequence,
+                    steps=self.data_sequence.length)
                 print('\nEvaluation epoch[{}] metrics[{:.2f}, {:.2f}] {}'.
                       format(
-                          epoch, loss, acc, census_model.metrics_names))
+                          epoch, loss, acc, face_age_model.metrics_names))
                 if self.job_dir.startswith("gs://"):
                     copy_file_to_gcs(self.job_dir, checkpoints[-1])
             else:
@@ -82,7 +83,7 @@ class ContinuousEval(keras.callbacks.Callback):
 
 
 def dispatch(train_prefix,
-             validation_prefix,
+             #             validation_prefix,
              job_dir,
              learning_rate,
              eval_frequency,
@@ -96,7 +97,9 @@ def dispatch(train_prefix,
     train_tmp_prefix = download_mats(train_prefix)
 
     # download train data
-    validation_tmp_prefix = download_mats(validation_prefix)
+    #validation_tmp_prefix = download_mats(validation_prefix)
+
+    train_x, train_y, cv_x, cv_y, input_shape = create_data(train_tmp_prefix)
 
     logger = logging.getLogger()
     sh = StreamHandler(stdout)
@@ -131,8 +134,10 @@ def dispatch(train_prefix,
         mode='max')
 
     # Continuous eval callback
+    val_datasequence = DataSequence(cv_x, cv_y, 64)
     evaluation = ContinuousEval(eval_frequency,
-                                validation_tmp_prefix,
+                                # validation_tmp_prefix,
+                                val_datasequence,
                                 learning_rate,
                                 job_dir,
                                 )
@@ -147,7 +152,7 @@ def dispatch(train_prefix,
     callbacks = [checkpoint, evaluation, tblog]
 
     train_data_sequence = DataSequence(
-        train_tmp_prefix
+        train_x, train_y, 64
     )
     #x_train, y_train = train_data_sequence.__getitem__(0)
 #     test_data_sequence = DataSequence(
@@ -217,10 +222,10 @@ if __name__ == "__main__":
                         required=True,
                         type=str,
                         help='Training files prefix local or GCS')
-    parser.add_argument('--validation-prefix', '-cv',
-                        required=True,
-                        type=str,
-                        help='Validation files prefix local or GCS')
+#     parser.add_argument('--validation-prefix', '-cv',
+#                         required=True,
+#                         type=str,
+#                         help='Validation files prefix local or GCS')
     parser.add_argument('--job-dir',
                         required=True,
                         type=str,
