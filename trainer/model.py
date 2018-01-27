@@ -30,6 +30,7 @@ from keras.optimizers import Optimizer, SGD, Adam
 from keras.legacy import interfaces
 import glob
 import tensorflow
+from keras.initializers import he_normal, glorot_normal
 """Implements the Keras Sequential model."""
 
 
@@ -45,10 +46,13 @@ from tensorflow.python.saved_model.signature_def_utils_impl import predict_signa
 import numpy as np
 import logging
 
+img_rows, img_cols = 60, 60
+
+seed = 1
 
 def model_fn(learning_rate, lam, dropout):
     """Create a Keras Sequential model with layers."""
-    input_tensor = Input(shape=(60, 60, 3))
+    input_tensor = Input(shape=(img_rows, img_cols, 3))
     vgg16 = VGG16(include_top=False, weights='imagenet',
                   input_tensor=input_tensor)
     # vgg16.layers.pop()
@@ -57,11 +61,11 @@ def model_fn(learning_rate, lam, dropout):
     # 最後のconv層の直前までの層をfreeze
     #vgg16.output_shape = vgg16.layers[-1].output_shape
     top_model = Flatten()(vgg16.output)
-    top_model = Dense(101, activation='relu', name='last_2', kernel_initializer='random_uniform')(top_model)
+    top_model = Dense(1024, activation='relu', name='last_2', kernel_initializer=he_normal(seed))(top_model)
 #     top_model.add(
-#         Dropout(dropout, input_shape=vgg16.layers[-1].output_shape[1:]))
+    top_model = Dropout(dropout)(top_model)
     top_model = Dense(101, activation='softmax',
-                      kernel_initializer='random_uniform', name='last')(top_model)
+                      kernel_initializer=glorot_normal(seed), name='last')(top_model)
     model = Model(inputs=vgg16.input, outputs=top_model)
     for layer in model.layers[:18]:
         layer.trainable = False
@@ -73,13 +77,14 @@ def model_fn(learning_rate, lam, dropout):
 def compile_model(model, learning_rate):
     last_layer_variables = list()
     for layer in model.layers:
-        if layer.name in ['last', 'last_2']:
+        if layer.name in ['last', 'last_2','last_3']:
             last_layer_variables.extend(layer.weights)
     model.compile(loss='categorical_crossentropy',
 #                   optimizer=MultiSGD(lr=learning_rate, momentum=0.9,
 #                                      decay=0.0005,
 #                                      exception_vars=last_layer_variables,
 #                                      multiplier=10),
+                #optimizer=SGD(lr=learning_rate, momentum=0.9),
                 optimizer=Adam(lr=learning_rate),
                   metrics=['accuracy', age_mae])
     return model
@@ -233,7 +238,6 @@ class DataSequence(Sequence):
         else:
             X, Y = convert_to_minibatch(
                 self.x, self.y, idx * batch_size, None)
-
         return X, Y
 
     def __len__(self):
@@ -342,11 +346,13 @@ def create_data(input_file):
     (X_train, y_train), (X_test, y_test) = load_data_split(input_file)
 
     # データをfloat型にして正規化する
-    X_train = X_train.astype('float32') / 255.0
-    X_test = X_test.astype('float32') / 255.0
+    # BGR
+    mean = np.array([103.939, 116.779, 123.68], dtype=np.float32).reshape(1, 1, 1, 3)
+    X_train = X_train.astype('float32') - mean
+    X_test = X_test.astype('float32') - mean
 
-    img_rows = 60
-    img_cols = 60
+#     img_rows = 60
+#     img_cols = 60
 
     # image_data_formatによって畳み込みに使用する入力データのサイズが違う
     if K.image_data_format() == 'channels_first':
@@ -381,9 +387,16 @@ if __name__ == '__main__':
     #     print(x_tr.shape, input_shape)
     #     print(len(y_tr))
     #     print(y_tr[0])
-
+    mean = np.array([103.939, 116.779, 123.68], dtype=np.float32).reshape(1, 1, 1, 3)
+    print(x_tr[1][1][1][0])
+    print(x_tr[1][1][1][1])
+    print(x_tr[1][1][1][2])
+    x_tr = x_tr - mean
+    print(x_tr[1][1][1][0])
+    print(x_tr[1][1][1][1])
+    print(x_tr[1][1][1][2])
     #model = model_fn(learning_rate=0.001, lam=0.0, dropout=0.5)
-    # print(model.summary())
+#    print(model.summary())
     #print(type(np_utils.to_categorical(5, 10)[0]))
     #     data = get_meta(
     #         ['gs://kceproject-1113-ml/intermediate/csv/path_age.csv-00000-of-00221'])
@@ -395,12 +408,12 @@ if __name__ == '__main__':
 #     print(y_tr.shape)
 #     print(x_tr[0])
 #     print(y_tr[0])
-    cv_seq = DataSequence(x_t, y_t, 64)
-    print('cv_length=%s' % cv_seq.length)
-    print(y_t.shape)
-    print(y_t.shape)
-    print(x_t[0])
-    print(y_t[0])
+#     cv_seq = DataSequence(x_t, y_t, 64)
+#     print('cv_length=%s' % cv_seq.length)
+#     print(y_t.shape)
+#     print(y_t.shape)
+    #print(x_t[0])
+    #print(y_t[0])
 
 #     data=model.evaluate_generator(
 #                     seq,

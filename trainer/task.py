@@ -34,7 +34,6 @@ from tensorflow.python.lib.io import file_io
 FILE_PATH = 'checkpoint.{epoch:02d}.hdf5'
 FACE_AGE_MODEL = 'face_age.hdf5'
 
-
 class ContinuousEval(keras.callbacks.Callback):
     """Continuous eval callback to evaluate the checkpoint once
        every so many epochs.
@@ -88,6 +87,7 @@ def dispatch(train_prefix,
              learning_rate,
              eval_frequency,
              num_epochs,
+             batch_size,
              checkpoint_epochs,
              lam,
              dropout
@@ -134,7 +134,7 @@ def dispatch(train_prefix,
         mode='max')
 
     # Continuous eval callback
-    val_datasequence = DataSequence(cv_x, cv_y, 64)
+    val_datasequence = DataSequence(cv_x, cv_y, batch_size)
     evaluation = ContinuousEval(eval_frequency,
                                 # validation_tmp_prefix,
                                 val_datasequence,
@@ -152,7 +152,7 @@ def dispatch(train_prefix,
     callbacks = [checkpoint, evaluation, tblog]
 
     train_data_sequence = DataSequence(
-        train_x, train_y, 64
+        train_x, train_y, batch_size
     )
     #x_train, y_train = train_data_sequence.__getitem__(0)
 #     test_data_sequence = DataSequence(
@@ -165,6 +165,7 @@ def dispatch(train_prefix,
         validation_data=(cv_x, cv_y),
         #validation_steps=val_datasequence.length,
         steps_per_epoch=train_data_sequence.length,
+        verbose=2,
         epochs=num_epochs,
         workers=multiprocessing.cpu_count(),
         use_multiprocessing=True,
@@ -236,6 +237,10 @@ if __name__ == "__main__":
                         type=float,
                         default=0.003,
                         help='Learning rate')
+    parser.add_argument('--batch-size',
+                        type=int,
+                        default=64,
+                        help='minibatch size')
     parser.add_argument('--eval-frequency',
                         default=1,
                         help='Perform one evaluation per n epochs')

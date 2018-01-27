@@ -1,5 +1,5 @@
 DATE=`date '+%Y%m%d_%H%M%S'`
-export JOB_NAME=face_age_vgg16_$DATE
+export JOB_NAME=face_age_$DATE
 export GCS_JOB_DIR=gs://kceproject-1113-ml/ml-job/$JOB_NAME
 echo $GCS_JOB_DIR
 
@@ -14,6 +14,6 @@ gcloud ml-engine jobs submit training $JOB_NAME \
   -- \
   -tr "gs://kceproject-1113-ml/ordinal-face/wiki_processed_all.mat" \
   --lam 0.0 \
-  --dropout 0.0 \
-  --num-epochs 20 \
-  --learning-rate 0.01
+  --dropout 0.5 \
+  --num-epochs 50 \
+  --learning-rate 0.0001

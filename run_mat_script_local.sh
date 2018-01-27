@@ -11,9 +11,9 @@ gcloud ml-engine local train \
 --module-name trainer.task \
 --package-path trainer/ \
   -- \
--tr "/home/jiman/data/wiki_process_60_128-tr-0.mat" \
---learning-rate 0.01 \
---num-epochs 20 \
---dropout 0.0 \
+-tr "/home/jiman/data/wiki_process_10000.mat" \
+--learning-rate 0.0001 \
+--num-epochs 50 \
+--dropout 0.5 \
 --lam 0.0
 
