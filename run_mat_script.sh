@@ -16,4 +16,5 @@ gcloud ml-engine jobs submit training $JOB_NAME \
   --lam 0.0 \
   --dropout 0.5 \
   --num-epochs 50 \
-  --learning-rate 0.0001
+  --learning-rate 0.001 \
+  --trainable -5

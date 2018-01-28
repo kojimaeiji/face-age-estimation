@@ -90,7 +90,8 @@ def dispatch(train_prefix,
              batch_size,
              checkpoint_epochs,
              lam,
-             dropout
+             dropout,
+             trainable
              ):
 
     # download train data
@@ -106,7 +107,14 @@ def dispatch(train_prefix,
     logger.addHandler(sh)
     logger.setLevel(logging.INFO)
     logger.info('learning_rate=%s' % learning_rate)
-    face_age_model = model.model_fn(learning_rate, lam, dropout)
+    if job_dir.startswith('gs://'):
+        model_file='/tmp/fr_model.h5'
+        verbose = 2
+    else:
+        model_file='trainer_face_recog/fr_model.h5'
+        verbose = 1
+
+    face_age_model = model.model_fn(learning_rate, lam, dropout, model_file=model_file, trainable=trainable)
 
     try:
         os.makedirs(job_dir)
@@ -149,7 +157,7 @@ def dispatch(train_prefix,
         write_graph=True,
         embeddings_freq=0)
 
-    callbacks = [checkpoint, evaluation, tblog]
+    callbacks = [checkpoint, tblog]
 
     train_data_sequence = FileDataSequence(
         train_tmp_prefix
@@ -165,7 +173,7 @@ def dispatch(train_prefix,
         validation_data=val_data_sequence,
         validation_steps=val_data_sequence.length,
         steps_per_epoch=train_data_sequence.length,
-        verbose=1,
+        verbose=verbose,
         epochs=num_epochs,
         workers=multiprocessing.cpu_count(),
         use_multiprocessing=True,
@@ -186,29 +194,6 @@ def dispatch(train_prefix,
 
 # h5py workaround: copy local models over to GCS if the job_dir is GCS.
 
-# def plot_history(history):
-#     # print(history.history.keys())
-#
-#     # 精度の履歴をプロット
-#     plt.plot(history.history['acc'])
-#     plt.plot(history.history['val_acc'])
-#     plt.title('model accuracy')
-#     plt.xlabel('epoch')
-#     plt.ylabel('accuracy')
-#     plt.legend(['acc', 'val_acc'], loc='lower right')
-#     plt.show()
-#
-#     # 損失の履歴をプロット
-#     plt.plot(history.history['loss'])
-#     plt.plot(history.history['val_loss'])
-#     plt.title('model loss')
-#     plt.xlabel('epoch')
-#     plt.ylabel('loss')
-#     plt.legend(['loss', 'val_loss'], loc='lower right')
-#     plt.show()
-#
-# # 学習履歴をプロット
-#     plot_history(history)
 
 
 def copy_file_to_gcs(job_dir, file_path):
@@ -260,5 +245,9 @@ if __name__ == "__main__":
                         type=int,
                         default=1,
                         help='Checkpoint per n training epochs')
+    parser.add_argument('--trainable',
+                        type=int,
+                        default=-1,
+                        help='trainable last layer')
     parse_args, unknown = parser.parse_known_args()
     dispatch(**parse_args.__dict__)

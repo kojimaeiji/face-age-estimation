@@ -11,10 +11,10 @@ gcloud ml-engine local train \
 --module-name trainer_face_recog.task \
 --package-path trainer_face_recog/ \
   -- \
--tr "gs://kceproject-1113-ml/wiki_face_rec/*" \
--cv "gs://kceproject-1113-ml/wiki_face_rec/*" \
---learning-rate 0.001 \
---num-epochs 50 \
---dropout 0.5 \
---lam 0.0
-
+-tr "/home/jiman/data/wiki_face_rec/wiki_3_96_all-tr*" \
+-cv "/home/jiman/data/wiki_face_rec/wiki_3_96_all-cv*" \
+--learning-rate 0.1 \
+--num-epochs 20 \
+--dropout 0.0 \
+--lam 0.0 \
+--trainable -5

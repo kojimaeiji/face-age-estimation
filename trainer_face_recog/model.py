@@ -32,7 +32,7 @@ from keras.initializers import he_normal, glorot_normal
 from keras.models import load_model
 from keras.layers.core import Dropout
 """Implements the Keras Sequential model."""
-from keras import backend as K, metrics
+from keras import backend as K, metrics, regularizers
 K.set_image_data_format('channels_first')
 
 #from keras import models
@@ -50,27 +50,37 @@ from inception_blocks_v2 import *
 
 seed = 1
 
-def model_fn(learning_rate, lam, dropout, model_file='/tmp/fr_model.h5'):
+def model_fn(learning_rate, lam, dropout, model_file='/tmp/fr_model.h5', trainable=-1):
     """Create a Keras Sequential model with layers."""
     #input_tensor = Input(shape=(img_rows, img_cols, 3))
     FRmodel = load_model(model_file, compile=False)#faceRecoModel(input_shape=(3, 96, 96))
+    FRmodel.layers.pop()
+    FRmodel.layers.pop()
+    #print(FRmodel.summary())
     # vgg16.layers.pop()
-    #vgg16.outputs = [vgg16.layers[-1].output]
-    #vgg16.layers[-1].outbound_nodes = []
+    FRmodel.outputs = [FRmodel.layers[-1].output]
+    FRmodel.layers[-1].outbound_nodes = []
     # 最後のconv層の直前までの層をfreeze
     #vgg16.output_shape = vgg16.layers[-1].output_shape
 #    top_model = Flatten()()
 #    top_model = Dense(1024, activation='relu', name='last_2', kernel_initializer=he_normal(seed))(top_model)
 #     top_model.add(
-    top_model = Dropout(dropout)(FRmodel.output)
+    top_model = Dropout(dropout)(FRmodel.layers[-1].output)
+    top_model = Dense(1024, kernel_initializer=glorot_normal(seed),
+                      kernel_regularizer=regularizers.l2(lam), name='last_2')(top_model)
+    top_model = Activation('relu')(top_model)
+    top_model = Dropout(dropout)(top_model)
     top_model = Dense(101, activation='softmax',
-                      kernel_initializer=glorot_normal(seed), name='last')(top_model)
+                      kernel_initializer=glorot_normal(seed),
+                      kernel_regularizer=regularizers.l2(lam), name='last')(top_model)
     model = Model(inputs=FRmodel.input, outputs=top_model)
     #load_weights_from_FaceNet(FRmodel)
     #model = Model(inputs=vgg16.input, outputs=top_model)
-    for layer in model.layers[:-1]:
+    for layer in model.layers[:trainable]:
         layer.trainable = False
-    print(model.summary())
+    #for layer in model.layers[50:]:
+    #    layer.trainable = True
+    #print(model.summary())
 
     compile_model(model, learning_rate)
     return model
@@ -86,15 +96,15 @@ def compile_model(model, learning_rate):
 #                                      decay=0.0005,
 #                                      exception_vars=last_layer_variables,
 #                                      multiplier=10),
-                #optimizer=SGD(lr=learning_rate, momentum=0.9),
-                optimizer=Adam(lr=learning_rate),
+                optimizer=SGD(lr=learning_rate, momentum=0.9, nesterov=True),
+                #optimizer=Adam(lr=learning_rate),
                   metrics=['accuracy', age_mae])
     return model
 
 CONST_LIST = [float(_i) for _i in range(101)]
 
 def age_mae(y_true, y_pred):
-    y_true = tf.cast(K.argmax(y_true, axis=1),'float')
+    y_true = tf.cast(K.argmax(y_true, axis=1), dtype=tf.float32)
     labels = K.constant(CONST_LIST, dtype=tf.float32)
     y_pred = labels * y_pred
     y_pred = K.sum(y_pred, axis=1)
@@ -254,8 +264,9 @@ class DataSequence(Sequence):
 class FileDataSequence(Sequence):
     def __init__(self, file_prefix):
         self.file_prefix = file_prefix
-
-        self.length = get_filenum(file_prefix)
+        length = get_filenum(file_prefix)
+        print('%s length=%s' % (file_prefix, length))
+        self.length = length
 
     def __getitem__(self, idx):
         # データの取得実装
@@ -377,19 +388,20 @@ def create_data(input_file):
 
 
 if __name__ == '__main__':
-    file_prefix = download_mats('/home/jiman/data/wiki_face_rec/wiki_3_96_all-tr-1.mat')
-    x_tr, y_tr, x_t, y_t, input_shape = create_data(
-         file_prefix)
-    print(x_tr.shape, input_shape)
-    print(len(y_tr))
-    print(x_tr[0])
-    print(y_tr[0])
-    #model = model_fn(learning_rate=0.001, lam=0.0, dropout=0.5)
-    #print(model.summary())
-    
+#     file_prefix = download_mats('/home/jiman/data/wiki_face_rec/wiki_3_96_all-tr-1.mat')
+#     x_tr, y_tr, x_t, y_t, input_shape = create_data(
+#          file_prefix)
+#     print(x_tr.shape, input_shape)
+#     print(len(y_tr))
+#     print(x_tr[0])
+#     print(y_tr[0])
+    model = model_fn(learning_rate=0.001, lam=0.0, dropout=0.5, model_file='fr_model.h5', trainable=-23)
+    for i, layer in enumerate(model.layers):
+        print('%d ,%s , train=%s, param_count=%s' % (i, layer.name, layer.trainable, layer.count_params()))
     #print(type(np_utils.to_categorical(5, 10)[0]))
     #     data = get_meta(
     #         ['gs://kceproject-1113-ml/intermediate/csv/path_age.csv-00000-of-00221'])
+    print(model.summary())
 #    seq = DataSequence('/Users/saboten/data/wiki_process_60_128*')
 #     seq = DataSequence(x_tr, y_tr, 64)
 #     x_tr, y_tr = seq.__getitem__(0)

@@ -4,6 +4,7 @@ import scipy.io
 import argparse
 from tqdm import tqdm
 from utils import get_meta
+import random
 
 
 def get_args():
@@ -22,7 +23,7 @@ def get_args():
                         help="minimum face_score")
     parser.add_argument("--max_count", type=int, default=None,
                         help="max_count")
-    parser.add_argument("--max_num_per_file", type=int, default=2048,
+    parser.add_argument("--max_num_per_file", type=int, default=64,
                         help="max_num_per_file")
     parser.add_argument("--train_ratio", type=float, default=0.8,
                         help="train_ratio")
@@ -60,7 +61,7 @@ def write_mat(out_imgs, out_genders, out_ages, db, img_size,
 
 
 def get_passed(length, min_score, age, face_score, gender):
-    return [i for i in range(length) if 0<age[i]<=100 and face_score[i]>=min_score and ~np.isnan(gender[i])]
+    return [i for i in range(length) if 0<=age[i]<=100 and face_score[i]>=min_score and ~np.isnan(gender[i])]
 
 def main():
     args = get_args()
@@ -91,6 +92,7 @@ def main():
     ext = output_path.split('/')[-1].split('.')[1]
     total_count = 0
     indexes = get_passed(length, min_score, age, face_score, gender)
+    random.shuffle(indexes)
     effective_length = len(indexes)
     train_length = int(
         max_count * train_ratio) if max_count is not None else int(effective_length * train_ratio)
