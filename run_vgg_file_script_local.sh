@@ -8,13 +8,13 @@ rm -rf /home/jiman/mljob/*
 
 gcloud ml-engine local train \
   --job-dir $GCS_JOB_DIR \
---module-name trainer_face_recog.task \
---package-path trainer_face_recog/ \
+--module-name trainer.task \
+--package-path trainer/ \
   -- \
--tr "/home/jiman/data/wiki_face_rec/wiki_3_96_all-tr*" \
--cv "/home/jiman/data/wiki_face_rec/wiki_3_96_all-cv*" \
---learning-rate 1.0 \
+-tr "/home/jiman/data/wiki_face_vgg_small/wiki_3_224_64-tr*" \
+-cv "/home/jiman/data/wiki_face_vgg_small/wiki_3_224_64-cv*" \
+--learning-rate 0.0001 \
 --num-epochs 20 \
 --dropout 0.0 \
---lam 0.0 \
---trainable -5
+--lam 0.0
+#--trainable -5

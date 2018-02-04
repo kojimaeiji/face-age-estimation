@@ -4,7 +4,7 @@ import scipy.io
 import argparse
 from tqdm import tqdm
 from utils import get_meta
-
+import random
 
 def get_args():
     parser = argparse.ArgumentParser(description="This script cleans-up noisy labels "
@@ -16,13 +16,13 @@ def get_args():
                         help="path to output database mat file")
     parser.add_argument("--db", type=str, default="wiki",
                         help="dataset; wiki or imdb")
-    parser.add_argument("--img_size", type=int, default=32,
+    parser.add_argument("--img_size", type=int, default=224,
                         help="output image size")
     parser.add_argument("--min_score", type=float, default=1.0,
                         help="minimum face_score")
     parser.add_argument("--max_count", type=int, default=None,
                         help="max_count")
-    parser.add_argument("--max_num_per_file", type=int, default=2048,
+    parser.add_argument("--max_num_per_file", type=int, default=32,
                         help="max_num_per_file")
     parser.add_argument("--train_ratio", type=float, default=0.8,
                         help="train_ratio")
@@ -91,6 +91,7 @@ def main():
     ext = output_path.split('/')[-1].split('.')[1]
     total_count = 0
     indexes = get_passed(length, min_score, age, face_score, gender)
+    random.shuffle(indexes)
     effective_length = len(indexes)
     train_length = int(
         max_count * train_ratio) if max_count is not None else int(effective_length * train_ratio)

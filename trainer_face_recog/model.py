@@ -66,7 +66,7 @@ def model_fn(learning_rate, lam, dropout, model_file='/tmp/fr_model.h5', trainab
 #    top_model = Dense(1024, activation='relu', name='last_2', kernel_initializer=he_normal(seed))(top_model)
 #     top_model.add(
     top_model = Dropout(dropout)(FRmodel.layers[-1].output)
-    top_model = Dense(1024, kernel_initializer=glorot_normal(seed),
+    top_model = Dense(128, kernel_initializer=glorot_normal(seed),
                       kernel_regularizer=regularizers.l2(lam), name='last_2')(top_model)
     top_model = Activation('relu')(top_model)
     top_model = Dropout(dropout)(top_model)

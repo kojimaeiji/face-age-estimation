@@ -13,12 +13,14 @@
 # limitations under the License.
 # ==============================================================================
 from trainer import model
-from trainer.model import DataSequence, download_mats, create_data
+from trainer.model import DataSequence, download_mats, create_data,\
+    FileDataSequence
 import keras
 import logging
 from logging import StreamHandler
 from sys import stdout
 from keras.models import load_model
+from keras.callbacks import EarlyStopping
 """This code implements a Feed forward neural network using Keras API."""
 
 import argparse
@@ -82,24 +84,23 @@ class ContinuousEval(keras.callbacks.Callback):
 
 
 def dispatch(train_prefix,
-             #             validation_prefix,
+             validation_prefix,
              job_dir,
              learning_rate,
-             eval_frequency,
              num_epochs,
-             batch_size,
              checkpoint_epochs,
              lam,
              dropout
              ):
 
     # download train data
-    train_tmp_prefix = download_mats(train_prefix)
+    train_tmp_prefix, val_tmp_prefix = download_mats(train_prefix, validation_prefix)
+    print(train_tmp_prefix, val_tmp_prefix)
 
     # download train data
     #validation_tmp_prefix = download_mats(validation_prefix)
 
-    train_x, train_y, cv_x, cv_y, input_shape = create_data(train_tmp_prefix)
+    #train_x, train_y, cv_x, cv_y, input_shape = create_data(train_tmp_prefix)
 
     logger = logging.getLogger()
     sh = StreamHandler(stdout)
@@ -119,6 +120,14 @@ def dispatch(train_prefix,
     checkpoint_path = FILE_PATH
     if not job_dir.startswith("gs://"):
         checkpoint_path = os.path.join(job_dir, checkpoint_path)
+        verbose = 1
+        multi = False
+        num_worker = 1
+    else:
+        verbose = 2
+        multi = False
+        num_worker = 1 #multiprocessing.cpu_count()
+        
 #
 #     meta_data = get_meta(train_files)
 #     indexes = [i for i in range(len(meta_data))]
@@ -134,13 +143,13 @@ def dispatch(train_prefix,
         mode='max')
 
     # Continuous eval callback
-    val_datasequence = DataSequence(cv_x, cv_y, batch_size)
-    evaluation = ContinuousEval(eval_frequency,
-                                # validation_tmp_prefix,
-                                val_datasequence,
-                                learning_rate,
-                                job_dir,
-                                )
+    val_datasequence = FileDataSequence(val_tmp_prefix)
+#     evaluation = ContinuousEval(eval_frequency,
+#                                 # validation_tmp_prefix,
+#                                 val_datasequence,
+#                                 learning_rate,
+#                                 job_dir,
+#                                 )
 
     # Tensorboard logs callback
     tblog = keras.callbacks.TensorBoard(
@@ -149,10 +158,10 @@ def dispatch(train_prefix,
         write_graph=True,
         embeddings_freq=0)
 
-    callbacks = [checkpoint, evaluation, tblog]
+    callbacks = [checkpoint, tblog, EarlyStopping()]
 
-    train_data_sequence = DataSequence(
-        train_x, train_y, batch_size
+    train_data_sequence = FileDataSequence(
+        train_tmp_prefix
     )
     #x_train, y_train = train_data_sequence.__getitem__(0)
 #     test_data_sequence = DataSequence(
@@ -162,13 +171,11 @@ def dispatch(train_prefix,
     face_age_model.fit_generator(  # x_train, y_train,
         #model.generator_input(train_files, chunk_size=CHUNK_SIZE),
         train_data_sequence,
-        validation_data=(cv_x, cv_y),
-        #validation_steps=val_datasequence.length,
+        validation_data=val_datasequence,
+        validation_steps=val_datasequence.length,
         steps_per_epoch=train_data_sequence.length,
-        verbose=2,
+        verbose=verbose,
         epochs=num_epochs,
-        workers=multiprocessing.cpu_count(),
-        use_multiprocessing=True,
         callbacks=callbacks)
 
     # plot_history(history)
@@ -224,10 +231,10 @@ if __name__ == "__main__":
                         required=True,
                         type=str,
                         help='Training files prefix local or GCS')
-#     parser.add_argument('--validation-prefix', '-cv',
-#                         required=True,
-#                         type=str,
-#                         help='Validation files prefix local or GCS')
+    parser.add_argument('--validation-prefix', '-cv',
+                        required=True,
+                        type=str,
+                        help='Validation files prefix local or GCS')
     parser.add_argument('--job-dir',
                         required=True,
                         type=str,
@@ -237,13 +244,6 @@ if __name__ == "__main__":
                         type=float,
                         default=0.003,
                         help='Learning rate')
-    parser.add_argument('--batch-size',
-                        type=int,
-                        default=64,
-                        help='minibatch size')
-    parser.add_argument('--eval-frequency',
-                        default=1,
-                        help='Perform one evaluation per n epochs')
     parser.add_argument('--lam',
                         type=float,
                         default=0.0,

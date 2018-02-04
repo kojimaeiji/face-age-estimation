@@ -10,12 +10,12 @@ gcloud ml-engine jobs submit training $JOB_NAME \
   --module-name trainer_face_recog.task \
   --package-path trainer_face_recog/ \
   --region us-central1 \
-  --scale-tier basic-gpu \
+  --config trainer_mat/cloudml-gpu.yaml \
   -- \
   -tr "gs://kceproject-1113-ml/wiki_face_rec/*" \
   -cv "gs://kceproject-1113-ml/wiki_face_rec/*" \
   --lam 0.0 \
   --dropout 0.0 \
   --num-epochs 20 \
-  --learning-rate 0.1 \
+  --learning-rate 1.0 \
   --trainable -5

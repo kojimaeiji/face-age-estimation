@@ -31,6 +31,7 @@ from keras.legacy import interfaces
 import glob
 import tensorflow
 from keras.initializers import he_normal, glorot_normal
+from keras.callbacks import EarlyStopping
 """Implements the Keras Sequential model."""
 
 
@@ -46,29 +47,29 @@ from tensorflow.python.saved_model.signature_def_utils_impl import predict_signa
 import numpy as np
 import logging
 
-img_rows, img_cols = 60, 60
+img_rows, img_cols = 224, 224
 
 seed = 1
 
 def model_fn(learning_rate, lam, dropout):
     """Create a Keras Sequential model with layers."""
     input_tensor = Input(shape=(img_rows, img_cols, 3))
-    vgg16 = VGG16(include_top=False, weights='imagenet',
+    vgg16 = VGG16(include_top=True, weights='imagenet',
                   input_tensor=input_tensor)
-    # vgg16.layers.pop()
+    vgg16.layers.pop()
     #vgg16.outputs = [vgg16.layers[-1].output]
     #vgg16.layers[-1].outbound_nodes = []
     # 最後のconv層の直前までの層をfreeze
     #vgg16.output_shape = vgg16.layers[-1].output_shape
-    top_model = Flatten()(vgg16.output)
-    top_model = Dense(1024, activation='relu', name='last_2', kernel_initializer=he_normal(seed))(top_model)
+    #top_model = Flatten()(vgg16.output)
+    #top_model = Dense(1024, activation='relu', name='last_2', kernel_initializer=he_normal(seed))(top_model)
 #     top_model.add(
-    top_model = Dropout(dropout)(top_model)
+    top_model = Dropout(dropout)(vgg16.layers[-1].output)
     top_model = Dense(101, activation='softmax',
                       kernel_initializer=glorot_normal(seed), name='last')(top_model)
     model = Model(inputs=vgg16.input, outputs=top_model)
-    for layer in model.layers[:18]:
-        layer.trainable = False
+#     for layer in model.layers[:18]:
+#         layer.trainable = False
 
     compile_model(model, learning_rate)
     return model
@@ -80,12 +81,12 @@ def compile_model(model, learning_rate):
         if layer.name in ['last', 'last_2','last_3']:
             last_layer_variables.extend(layer.weights)
     model.compile(loss='categorical_crossentropy',
-#                   optimizer=MultiSGD(lr=learning_rate, momentum=0.9,
-#                                      decay=0.0005,
-#                                      exception_vars=last_layer_variables,
-#                                      multiplier=10),
+                optimizer=MultiSGD(lr=learning_rate, momentum=0.9,
+                                   decay=0.0005,
+                                   exception_vars=last_layer_variables,
+                                   multiplier=10),
                 #optimizer=SGD(lr=learning_rate, momentum=0.9),
-                optimizer=Adam(lr=learning_rate),
+                #optimizer=Adam(lr=learning_rate),
                   metrics=['accuracy', age_mae])
     return model
 
@@ -257,7 +258,7 @@ class FileDataSequence(Sequence):
 
     def __getitem__(self, idx):
         # データの取得実装
-        logger = logging.getLogger()
+        #logger = logging.getLogger()
         #logger.info('idx=%s' % idx)
 
         #batch_size = self.batch_size
@@ -265,9 +266,12 @@ class FileDataSequence(Sequence):
         root = self.file_prefix.split(file_prefix)[0]
         filename = '%s-%s.mat' % (file_prefix, idx)
         full_path = '%s%s' % (root, filename)
-        print('full_path=%s' % full_path)
+        #print('full_path=%s' % full_path)
         x, y = load_data(full_path)
-        x = x / 255.0
+        #x = x / 255.0
+        x = x.astype(np.float32)
+        mean = np.array([103.939, 116.779, 123.68], dtype=np.float32).reshape(1, 1, 1, 3)
+        x -= mean
         #y = np.array([create_y_encode(y[i]) for i in range(len(y))])
         y = np_utils.to_categorical(y, 101)
         #print('return x,y')
@@ -300,14 +304,17 @@ def unpack(xy):
     return x, y
 
 
-def download_mats(file_prefix):
-    if file_prefix.startswith('gs://'):
-        cmd = 'gsutil -m cp -r %s /tmp' % file_prefix
+def download_mats(train_file_prefix, val_file_prefix):
+    if train_file_prefix.startswith('gs://'):
+        cmd = 'gsutil cp %s /tmp' % train_file_prefix
         subprocess.check_call(cmd.split())
-        return '/tmp/%s' % file_prefix.split('/')[-1]
+        cmd = 'tar -zxvf /tmp/imdb_face_vgg_all.tar.gz -C /tmp'
+        subprocess.check_call(cmd.split())
+        return '/tmp/wiki_face_vgg_all/imdb_224_all-tr*','/tmp/imdb_face_vgg_all/imdb_224_all-cv*'
+        #return '/tmp/%s' % file_prefix.split('/')[-1]
     else:
-        return file_prefix
-
+        return train_file_prefix, val_file_prefix
+    
 
 def load_data(mat_path):
     d = loadmat(mat_path)
@@ -381,22 +388,22 @@ def create_data(input_file):
 
 
 if __name__ == '__main__':
-    file_prefix = download_mats('/home/jiman/data/wiki_process_10000.mat')
-    x_tr, y_tr, x_t, y_t, input_shape = create_data(
-        file_prefix)
+    #file_prefix = download_mats('/home/jiman/data/wiki_process_10000.mat')
+    #x_tr, y_tr, x_t, y_t, input_shape = create_data(
+    #    file_prefix)
     #     print(x_tr.shape, input_shape)
     #     print(len(y_tr))
     #     print(y_tr[0])
-    mean = np.array([103.939, 116.779, 123.68], dtype=np.float32).reshape(1, 1, 1, 3)
-    print(x_tr[1][1][1][0])
-    print(x_tr[1][1][1][1])
-    print(x_tr[1][1][1][2])
-    x_tr = x_tr - mean
-    print(x_tr[1][1][1][0])
-    print(x_tr[1][1][1][1])
-    print(x_tr[1][1][1][2])
-    #model = model_fn(learning_rate=0.001, lam=0.0, dropout=0.5)
-#    print(model.summary())
+    #mean = np.array([103.939, 116.779, 123.68], dtype=np.float32).reshape(1, 1, 1, 3)
+    #print(x_tr[1][1][1][0])
+    #print(x_tr[1][1][1][1])
+    #print(x_tr[1][1][1][2])
+    #x_tr = x_tr - mean
+    #print(x_tr[1][1][1][0])
+    #print(x_tr[1][1][1][1])
+    #print(x_tr[1][1][1][2])
+    model = model_fn(learning_rate=0.001, lam=0.0, dropout=0.5)
+    print(model.summary())
     #print(type(np_utils.to_categorical(5, 10)[0]))
     #     data = get_meta(
     #         ['gs://kceproject-1113-ml/intermediate/csv/path_age.csv-00000-of-00221'])
