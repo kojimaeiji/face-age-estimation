@@ -1,17 +1,15 @@
 import numpy as np
 import cv2
-import scipy.io
 import argparse
-from tqdm import tqdm
 from utils import get_meta
 import random
+from joblib import Parallel, delayed
+
 
 def get_args():
     parser = argparse.ArgumentParser(description="This script cleans-up noisy labels "
                                                  "and creates database for training.",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-#    parser.add_argument("--input", "-i", type=str, required=True,
-#                        help="path to input database mat file")
     parser.add_argument("--output", "-o", type=str, required=True,
                         help="path to output database mat file")
     parser.add_argument("--db", type=str, default="wiki",
@@ -37,40 +35,76 @@ def path_concat(path_list):
     return path
 
 
-def write_mat(out_imgs, out_genders, out_ages, db, img_size,
-              min_score, total_count, train_length, outpath_prefix,
-              filename, file_count, ext
+def write_mat(out_imgs, out_genders, out_ages, file_full
               ):
-#     output = {"image": np.array(out_imgs),
-#               "gender": np.array(out_genders),
-#               "age": np.array(out_ages),
-#               "db": db,
-#               "img_size": img_size,
-#               "min_score": min_score}
-    if total_count <= train_length:
-        np.savez_compressed('%s/%s-tr-%s' % (outpath_prefix,
-                                             filename,
-                                             file_count),
-                         image=np.array(out_imgs),
-                         gender=np.array(out_genders),
-                         age=np.array(out_ages))
-    else:
-        np.savez_compressed('%s/%s-cv-%s' % (outpath_prefix,
-                                             filename,
-                                             file_count),
-                         image=np.array(out_imgs),
-                         gender=np.array(out_genders),
-                         age=np.array(out_ages))
+    image = np.array(out_imgs)
+    age = np.array(out_ages)
+    gender = np.array(out_genders)
+    np.savez_compressed(file_full, image=image, age=age, gender=gender)
 
 
 def get_passed(length, min_score, age, face_score, gender):
-    return [i for i in range(length) if 0<age[i]<=100 and face_score[i]>=min_score and ~np.isnan(gender[i])]
+    return [i for i in range(length) if 0 <= age[i] <= 100
+            and face_score[i] >= min_score and ~np.isnan(gender[i])]
+
+
+def minibatch_gen(data, size):
+    length = len(data)
+    iternum = length // size + 1 if length % size != 0 else length // size
+    mini_list = []
+    for i in range(iternum):
+        mini = data[i * size:(i + 1) * size] if (i + 1) * size <= length \
+            else data[i * size:]
+        mini_list.append(mini)
+    return mini_list
+
+
+def make_meta(idxs, images, ages, genders):
+    return [(images[i][0], ages[i], genders[i]) for i in idxs]
+
+
+def process(mini_type, root_path, img_size, outpath_prefix,
+            file_name, i, mini):
+    '''
+    process mini batch and save to file
+    '''
+    out_genders = []
+    out_ages = []
+    out_imgs = []
+    if mini_type == 'train':
+        filefull = '%s/%s-tr-%s' % (outpath_prefix,
+                                    file_name,
+                                    i)
+    else:
+        filefull = '%s/%s-cv-%s' % (outpath_prefix,
+                                    file_name,
+                                    i)
+    for m in mini:
+        # gender
+        out_genders.append(int(m[2]))
+        # age
+        out_ages.append(m[1])
+        img = cv2.imread(root_path + str(m[0]), 1)
+        img = cv2.resize(img, (img_size, img_size))
+        out_imgs.append(img)
+
+    # save to file
+    write_mat(out_imgs, out_genders, out_ages,
+              filefull
+              )
+
+
+def split_meta_indexes(idxs, train_length, max_count=None):
+    if max_count is None:
+        return idxs[0:train_length], idxs[train_length:]
+    else:
+        return idxs[0:train_length], idxs[train_length:max_count]
+
 
 def main():
     args = get_args()
     output_path = args.output
     db = args.db
-#    mat_path = args.input
     max_count = args.max_count
     img_size = args.img_size
     min_score = args.min_score
@@ -82,68 +116,46 @@ def main():
     full_path, dob, gender, photo_taken, face_score, second_face_score, age = get_meta(
         mat_path, db)
 
-    out_genders = []
-    out_ages = []
-    out_imgs = []
-
     length = len(face_score)
-#    max_num_per_file = num_per_file
-    file_count = 0
+
+    # make out filepath
     outpath_prefix = output_path.split('/')[:-1]
     outpath_prefix = path_concat(outpath_prefix)
     filename = output_path.split('/')[-1].split('.')[0]
-    ext = output_path.split('/')[-1].split('.')[1]
-    total_count = 0
+
+    # filter bad images and get passed indexes
     indexes = get_passed(length, min_score, age, face_score, gender)
+
+    # shuffle indexes
     random.shuffle(indexes)
     effective_length = len(indexes)
     train_length = int(
         max_count * train_ratio) if max_count is not None else int(effective_length * train_ratio)
     print('train_length=%s' % train_length)
-    for i in tqdm(indexes):
-        #print('total_count=%s' % total_count)
-#        if face_score[i] < min_score:
-#            print('face score bad')
-#            continue
 
-#         if (~np.isnan(second_face_score[i])) and second_face_score[i] > 0.0:
-#             continue
+    # spilit meta data
+    train_idxs, val_idxs = split_meta_indexes(
+        indexes, train_length, max_count=max_count)
 
-#        if ~(0 <= age[i] <= 100):
-#            print('age bad')
-#            continue
+    # get meta data from filtered indexes
+    train_metas = make_meta(train_idxs, full_path, age, gender)
+    val_metas = make_meta(val_idxs, full_path, age, gender)
 
-#        if np.isnan(gender[i]):
-#            print('gender bad')
-#            continue
+    # split to mini batchs
+    mini_list = minibatch_gen(train_metas, max_num_per_file)
 
-        out_genders.append(int(gender[i]))
-        out_ages.append(age[i])
-        img = cv2.imread(root_path + str(full_path[i][0]), 1)
-        img = cv2.resize(img, (img_size, img_size))
-        out_imgs.append(img)
-        total_count += 1
-        if max_count is not None and total_count >= max_count:
-            break
+    # process and save train data
+    Parallel(n_jobs=-1, verbose=5)([delayed(process)('train', root_path,
+                                                     img_size,
+                                                     outpath_prefix,
+                                                     filename, i, mini) for i, mini in enumerate(mini_list)])
 
-        if (len(out_imgs) % max_num_per_file == 0 and len(out_imgs) > 0) or \
-                total_count == train_length:
-            write_mat(out_imgs, out_genders, out_ages, db, img_size,
-                      min_score, total_count, train_length, outpath_prefix,
-                      filename, file_count, ext
-                      )
-            file_count += 1
-            if total_count == train_length:
-                print('train range end')
-                file_count = 0
-            out_imgs = []
-            out_genders = []
-            out_ages = []
-            output = {}
-    write_mat(out_imgs, out_genders, out_ages, db, img_size,
-                    min_score, total_count, train_length, outpath_prefix,
-                      filename, file_count, ext
-                )
+    # process and save validation data
+    mini_list = minibatch_gen(val_metas, max_num_per_file)
+    Parallel(n_jobs=-1, verbose=5)([delayed(process)('val', root_path,
+                                                     img_size,
+                                                     outpath_prefix,
+                                                     filename, i, mini) for i, mini in enumerate(mini_list)])
 
 
 if __name__ == '__main__':
