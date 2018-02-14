@@ -12,8 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from trainer import model
-from trainer.model import DataSequence, download_mats, create_data,\
+import sys
+print(sys.path)
+
+from trainer_vgg_face import model
+from trainer_vgg_face.model import DataSequence, download_mats, create_data,\
     FileDataSequence
 import keras
 import logging
@@ -94,15 +97,20 @@ def dispatch(train_prefix,
              dropout,
              model_file
              ):
-
+    print(model_file)
     # download train data
     #train_tmp_prefix, val_tmp_prefix = download_mats(train_prefix, validation_prefix)
     train_tmp_prefix = train_prefix
     val_tmp_prefix = validation_prefix
     print(train_tmp_prefix, val_tmp_prefix)
 
-    # download train data
-    #validation_tmp_prefix = download_mats(validation_prefix)
+    # create train datasequence
+    train_data_sequence = FileDataSequence(
+        train_tmp_prefix
+    )
+    
+    # create val datasequence
+    val_datasequence = FileDataSequence(val_tmp_prefix)
 
     #train_x, train_y, cv_x, cv_y, input_shape = create_data(train_tmp_prefix)
 
@@ -111,22 +119,14 @@ def dispatch(train_prefix,
     logger.addHandler(sh)
     logger.setLevel(logging.INFO)
     logger.info('learning_rate=%s' % learning_rate)
-    if model_file is not None:
-        if model_file.startswith('gs://'):
-            cmd = 'gsutil cp %s /tmp' % model_file
-            subprocess.check_call(cmd.split())
-            real_model_file = '/tmp/%s' % model_file.split('/')[-1]
-        else:
-            real_model_file = model_file
-        face_age_model = load_model(real_model_file, compile=False)
-        face_age_model = model.compile_model(face_age_model, learning_rate)
-    else:
-        face_age_model = model.model_fn(learning_rate, lam, dropout)
-
+    
+    # create job dir if not exists
     try:
         os.makedirs(job_dir)
     except Exception:
         pass
+
+
 
     # Unhappy hack to work around h5py not being able to write to GCS.
     # Force snapshots and saves to local filesystem, then copy them over to
@@ -139,14 +139,9 @@ def dispatch(train_prefix,
         num_worker = 1
     else:
         verbose = 2
-        multi = False
-        num_worker = 1 #multiprocessing.cpu_count()
+        multi = True
+        num_worker = 4 #multiprocessing.cpu_count()
         
-#
-#     meta_data = get_meta(train_files)
-#     indexes = [i for i in range(len(meta_data))]
-#     random.shuffle(indexes)
-#     meta_data = meta_data.loc[indexes].reset_index(drop=True)
 
     # Model checkpoint callback
     checkpoint = keras.callbacks.ModelCheckpoint(
@@ -157,7 +152,6 @@ def dispatch(train_prefix,
         mode='max')
 
     # Continuous eval callback
-    val_datasequence = FileDataSequence(val_tmp_prefix)
 #     evaluation = ContinuousEval(eval_frequency,
 #                                 # validation_tmp_prefix,
 #                                 val_datasequence,
@@ -174,23 +168,53 @@ def dispatch(train_prefix,
 
     callbacks = [checkpoint, tblog]
 
-    train_data_sequence = FileDataSequence(
-        train_tmp_prefix
-    )
     #x_train, y_train = train_data_sequence.__getitem__(0)
 #     test_data_sequence = DataSequence(
 #         validation_tmp_prefix
 #     )
 
-    face_age_model.fit_generator(  # x_train, y_train,
-        #model.generator_input(train_files, chunk_size=CHUNK_SIZE),
+    # create model and compile
+    if model_file is not None:
+        if model_file.startswith('gs://'):
+            cmd = 'gsutil cp %s /tmp' % model_file
+            subprocess.check_call(cmd.split())
+            real_model_file = '/tmp/%s' % model_file.split('/')[-1]
+        else:
+            real_model_file = model_file
+        face_age_model = load_model(real_model_file, compile=False)
+        #face_age_model = model.compile_model(face_age_model, learning_rate)
+        initial_epoch = 1
+    else:
+        face_age_model = model.model_fn(lam, dropout)
+        
+        #first train last layer
+        for layer in face_age_model.layers[:-1]:
+            layer.trainable =False
+        face_age_model = model.compile_model(face_age_model, learning_rate)
+        face_age_model.fit_generator(
+            train_data_sequence,
+            validation_data=val_datasequence,
+            validation_steps=val_datasequence.length,
+            steps_per_epoch=train_data_sequence.length,
+            verbose=verbose,
+            epochs=1,
+            callbacks=callbacks)
+        initial_epoch=2
+
+
+    for layer in face_age_model.layers[:-6]:
+        layer.trainable = True
+    face_age_model = model.compile_model(face_age_model, learning_rate)
+    
+    face_age_model.fit_generator(
         train_data_sequence,
         validation_data=val_datasequence,
         validation_steps=val_datasequence.length,
         steps_per_epoch=train_data_sequence.length,
         verbose=verbose,
         epochs=num_epochs,
-        callbacks=callbacks)
+        callbacks=callbacks,
+        initial_epoch=initial_epoch)
 
     # plot_history(history)
     # Unhappy hack to work around h5py not being able to write to GCS.
@@ -279,5 +303,4 @@ if __name__ == "__main__":
                         default=None,
                         help='Model file to continue to train ')
     parse_args, unknown = parser.parse_known_args()
-
     dispatch(**parse_args.__dict__)

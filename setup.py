@@ -4,7 +4,7 @@ from setuptools import setup
 REQUIRED_PACKAGES = ['Keras>=2.0.7', 'h5py>=2.7.0']
 
 setup(
-    name='trainer_face_recog',
+    name='trainer_vgg_face',
     version='0.1',
     install_requires=REQUIRED_PACKAGES,
     packages=find_packages(),

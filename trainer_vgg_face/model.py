@@ -14,18 +14,13 @@
 # limitations under the License.
 # ==============================================================================
 from keras.layers.core import Flatten, Dense, Activation, Dropout
-from keras.layers.convolutional import Conv2D
-from keras.layers.pooling import MaxPool2D
-from keras.models import Model, Sequential
+from keras.models import Model
 #import cv2
 from keras.utils import Sequence
 from keras.utils import np_utils
 from scipy.io import loadmat
-import random
 import tensorflow as tf
-from keras.layers.normalization import BatchNormalization
 import subprocess
-from keras.applications.vgg16 import VGG16
 from keras.optimizers import Optimizer, SGD, Adam
 from keras.legacy import interfaces
 import glob
@@ -34,6 +29,7 @@ from keras.initializers import he_normal, glorot_normal
 from keras.callbacks import EarlyStopping
 from _io import BytesIO
 from tensorflow.python.lib.io import file_io
+from vggface import VGGFace
 """Implements the Keras Sequential model."""
 
 
@@ -53,12 +49,13 @@ img_rows, img_cols = 224, 224
 
 seed = 1
 
-def model_fn(learning_rate, lam, dropout):
+def model_fn(lam, dropout):
     """Create a Keras Sequential model with layers."""
     input_tensor = Input(shape=(img_rows, img_cols, 3))
-    vgg16 = VGG16(include_top=True, weights='imagenet',
+    vggface16 =VGGFace(include_top=True, model='vgg16',weights='vggface',
                   input_tensor=input_tensor)
-    vgg16.layers.pop()
+    vggface16.layers.pop()
+    vggface16.layers.pop()
     #vgg16.outputs = [vgg16.layers[-1].output]
     #vgg16.layers[-1].outbound_nodes = []
     # 最後のconv層の直前までの層をfreeze
@@ -66,14 +63,15 @@ def model_fn(learning_rate, lam, dropout):
     #top_model = Flatten()(vgg16.output)
     #top_model = Dense(1024, activation='relu', name='last_2', kernel_initializer=he_normal(seed))(top_model)
 #     top_model.add(
-    top_model = Dropout(dropout)(vgg16.layers[-1].output)
+    print(vggface16.layers[-1].output)
+    top_model = Dropout(dropout)(vggface16.layers[-1].output)
     top_model = Dense(101, activation='softmax',
                       kernel_initializer=glorot_normal(seed), name='last')(top_model)
-    model = Model(inputs=vgg16.input, outputs=top_model)
-#     for layer in model.layers[:18]:
-#         layer.trainable = False
+    model = Model(inputs=vggface16.input, outputs=top_model)
+    #for layer in model.layers[:18]:
+    #     layer.trainable = False
 
-    compile_model(model, learning_rate)
+    #compile_model(model, learning_rate)
     return model
 
 
@@ -83,11 +81,11 @@ def compile_model(model, learning_rate):
         if layer.name in ['last', 'last_2','last_3']:
             last_layer_variables.extend(layer.weights)
     model.compile(loss='categorical_crossentropy',
-                optimizer=MultiSGD(lr=learning_rate, momentum=0.9,
-                                   decay=0.0005,
-                                   exception_vars=last_layer_variables,
-                                   multiplier=10),
-                #optimizer=SGD(lr=learning_rate, momentum=0.9),
+#                 optimizer=MultiSGD(lr=learning_rate, momentum=0.9,
+#                                   decay=0.0005,
+#                                    exception_vars=last_layer_variables,
+#                                    multiplier=10),
+                optimizer=SGD(lr=learning_rate, momentum=0.9, nesterov=True),
                 #optimizer=Adam(lr=learning_rate),
                   metrics=['accuracy', age_mae])
     return model
@@ -406,7 +404,10 @@ if __name__ == '__main__':
     #print(x_tr[1][1][1][0])
     #print(x_tr[1][1][1][1])
     #print(x_tr[1][1][1][2])
-    model = model_fn(learning_rate=0.001, lam=0.0, dropout=0.5)
+    model = model_fn(lam=0.0, dropout=0.5)
+    for layer in model.layers[:-6]:
+        layer.trainable = False
+    compile_model(model, learning_rate=0.001)
     print(model.summary())
     #print(type(np_utils.to_categorical(5, 10)[0]))
     #     data = get_meta(

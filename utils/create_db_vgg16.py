@@ -41,22 +41,26 @@ def write_mat(out_imgs, out_genders, out_ages, db, img_size,
               min_score, total_count, train_length, outpath_prefix,
               filename, file_count, ext
               ):
-    output = {"image": np.array(out_imgs),
-              "gender": np.array(out_genders),
-              "age": np.array(out_ages),
-              "db": db,
-              "img_size": img_size,
-              "min_score": min_score}
+#     output = {"image": np.array(out_imgs),
+#               "gender": np.array(out_genders),
+#               "age": np.array(out_ages),
+#               "db": db,
+#               "img_size": img_size,
+#               "min_score": min_score}
     if total_count <= train_length:
-        scipy.io.savemat('%s/%s-tr-%s.%s' % (outpath_prefix,
+        np.savez_compressed('%s/%s-tr-%s' % (outpath_prefix,
                                              filename,
-                                             file_count, ext),
-                         output)
+                                             file_count),
+                         image=np.array(out_imgs),
+                         gender=np.array(out_genders),
+                         age=np.array(out_ages))
     else:
-        scipy.io.savemat('%s/%s-cv-%s.%s' % (outpath_prefix,
+        np.savez_compressed('%s/%s-cv-%s' % (outpath_prefix,
                                              filename,
-                                             file_count, ext),
-                         output)
+                                             file_count),
+                         image=np.array(out_imgs),
+                         gender=np.array(out_genders),
+                         age=np.array(out_ages))
 
 
 def get_passed(length, min_score, age, face_score, gender):
@@ -117,7 +121,6 @@ def main():
         out_ages.append(age[i])
         img = cv2.imread(root_path + str(full_path[i][0]), 1)
         img = cv2.resize(img, (img_size, img_size))
-
         out_imgs.append(img)
         total_count += 1
         if max_count is not None and total_count >= max_count:
